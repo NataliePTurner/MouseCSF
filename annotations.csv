@@ -1,0 +1,11 @@
+﻿Run,Condition,BioReplicate,IsotopeLabelType,Outlier,Other,,,Identifier
+CSF_M3_run2.raw,Non-dep,1,L,,male,,,ND4-M
+CSF_M5_run2.raw,Non-dep,2,L,,male,,,ND5-M
+CSF_M8_run2.raw,Dep,3,L,,male,,,D4-M
+CSF_M11_run2.raw,Dep,4,L,,male,,,D1-M
+CSF_M14_run2.raw,Non-dep,5,L,,female,,,ND1-F
+CSF_M15_run2.raw,Non-dep,6,L,TRUE,female,received IgG Isotype,,
+CSF_M16_run2.raw,Non-dep,7,L,,female,,,ND2-F
+CSF_M18_run2.raw,Non-dep,8,L,,female,,,ND3-F
+CSF_M19.raw,Dep,9,L,,female,,,D2-F
+CSF_M20.raw,Dep,10,L,,female,,,D3-F
