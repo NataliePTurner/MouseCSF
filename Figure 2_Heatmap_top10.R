@@ -150,25 +150,6 @@ library(tibble)
 
 cat("\n=== CREATING HEATMAP VISUALIZATION ===\n")
 
-# Read sample annotations
-cat("Reading sample annotations...\n")
-print("Annotations data:")
-print(annotations)
-
-# Remove row 6 from annotations (CSF_M15_run2.raw outlier)
-annotations_clean <- annotations[-6, ]
-
-# Create a mapping of column positions to sample information
-sample_info <- annotations_clean %>%
-  arrange(Run) %>%
-  mutate(
-    Sample_Label = paste0(substr(Condition, 1, 1), BioReplicate, "_", substr(Other, 1, 1)),
-    Full_Label = paste0(Condition, "_", BioReplicate, " (", Other, ")")
-  )
-
-print("Sample mapping (after removing outlier):")
-print(sample_info)
-
 # Get top proteins from each group
 top_dep <- head(dep_specific, 10)
 top_non_dep <- head(non_dep_specific, 10)
@@ -179,49 +160,71 @@ top_proteins <- c(top_dep$protein, top_non_dep$protein)
 # Create detection matrix
 detection_matrix <- protein_data %>%
   dplyr::filter(`...1` %in% top_proteins) %>%
-  dplyr::select(1, all_of(c(Dep_cols, Non_dep_cols))) %>%  # Select by position
+  dplyr::select(1, all_of(c(Dep_cols, Non_dep_cols))) %>%
   column_to_rownames("...1") %>%
   mutate_all(~ifelse(is.na(.), 0, 1))
 
-# Reorder rows to match desired order
-detection_matrix <- detection_matrix[top_proteins, ]
+# Rename columns with correct animal numbers and sex
+# Dep_cols c(2, 6, 7, 10) → M11, M19, M20, M8 
+# From script: D1=M11(M), D2=M19(F), D3=M20(F), D4=M8(M)
+# Non_dep_cols c(3, 4, 5, 8, 9) → M14, M16, M18, M3, M5
+# From script: ND1=M14(F), ND2=M16(F), ND3=M18(F), ND4=M3(M), ND5=M5(M)
+colnames(detection_matrix) <- c("D1-M", "D2-F", "D3-F", "D4-M", 
+                                "ND1-F", "ND2-F", "ND3-F", "ND4-M", "ND5-M")
 
-# Rename columns for clarity (Dep samples first, then Non-dep samples)
-colnames(detection_matrix) <- c(paste0("Dep_", 1:4), paste0("Non-dep_", 1:5))
+# Sort columns within each group by animal number
+dep_cols <- grep("^D[0-9]", colnames(detection_matrix), value = TRUE)
+nondep_cols <- grep("^ND", colnames(detection_matrix), value = TRUE)
+
+dep_cols_sorted <- dep_cols[order(as.numeric(gsub("D([0-9]+)-[MF]", "\\1", dep_cols)))]
+nondep_cols_sorted <- nondep_cols[order(as.numeric(gsub("ND([0-9]+)-[MF]", "\\1", nondep_cols)))]
+
+detection_matrix <- detection_matrix[, c(dep_cols_sorted, nondep_cols_sorted)]
 
 # Clean up protein names (remove _MOUSE suffix)
 rownames(detection_matrix) <- gsub("_MOUSE", "", rownames(detection_matrix))
 
-# Create column annotations
+# Define protein name groups after cleaning
+dep_protein_names <- gsub("_MOUSE", "", top_dep$protein)
+nondep_protein_names <- gsub("_MOUSE", "", top_non_dep$protein)
+
+# Sort rows by total detections (high to low) within each protein group
+dep_rows <- detection_matrix[rownames(detection_matrix) %in% dep_protein_names, , drop = FALSE]
+dep_rows <- dep_rows[order(rowSums(dep_rows), decreasing = TRUE), , drop = FALSE]
+
+nondep_rows <- detection_matrix[rownames(detection_matrix) %in% nondep_protein_names, , drop = FALSE]
+nondep_rows <- nondep_rows[order(rowSums(nondep_rows), decreasing = TRUE), , drop = FALSE]
+
+# Recombine with Dep-specific on top
+detection_matrix <- rbind(dep_rows, nondep_rows)
+
+# Create column annotations with Group and Sex
+# After sorting, column order is: D1-M, D2-F, D3-F, D4-M, ND1-F, ND2-F, ND3-F, ND4-M, ND5-M
 col_annotations <- data.frame(
-  Group = c(rep("Dep", 4), rep("Non-dep", 5))
+  Group = c(rep("Dep", 4), rep("Non-dep", 5)),
+  Sex = c("M", "F", "F", "M", "F", "F", "F", "M", "M")
 )
 rownames(col_annotations) <- colnames(detection_matrix)
 
-# Add protein type annotations for rows
-cleaned_protein_names <- gsub("_MOUSE", "", top_proteins)
+# Create row annotations to match sorted order
 row_annotations <- data.frame(
-  Specificity = c(rep("Dep-specific", nrow(dep_top10)), rep("Non-dep-specific", nrow(non_dep_top10)))
+  Specificity = c(rep("Dep-specific", nrow(dep_rows)), rep("Non-dep-specific", nrow(nondep_rows)))
 )
-rownames(row_annotations) <- cleaned_protein_names
+rownames(row_annotations) <- rownames(detection_matrix)
 
 # Define annotation colors
 annotation_colors <- list(
   Group = c("Dep" = "#E31A1C", "Non-dep" = "#1F78B4"),
+  Sex = c("M" = "#6A3D9A", "F" = "#FB9A99"),
   Specificity = c("Dep-specific" = "#FF7F00", "Non-dep-specific" = "#33A02C")
 )
-
-# Add sex colors if available
-if("Sex" %in% names(col_annotations)) {
-  annotation_colors$Sex <- c("male" = "#FFD700", "female" = "#FF69B4")
-}
 
 # Define heatmap colors
 heatmap_colors <- colorRamp2(c(0, 1), c("white", "blue"))
 
 # Create the heatmap
 p2 <- Heatmap(as.matrix(detection_matrix),
-              name = "Detection Patterns: Group-Specific Proteins\n(Dep-specific above, Non-dep-specific below)",
+              name = "Detection",
               col = heatmap_colors,
               cluster_rows = FALSE,
               cluster_columns = FALSE,
@@ -249,7 +252,9 @@ p2 <- Heatmap(as.matrix(detection_matrix),
                   labels_gp = gpar(fontsize = 12)
                 )
               ),
-              row_gap = unit(1, "cm"),
+              row_split = factor(row_annotations$Specificity, 
+                                 levels = c("Dep-specific", "Non-dep-specific")),
+              row_gap = unit(5, "mm"),
               cell_fun = function(j, i, x, y, width, height, fill) {
                 grid.rect(x = x, y = y, width = width, height = height,
                           gp = gpar(col = "black", lwd = 0.5, fill = NA))
@@ -258,13 +263,11 @@ p2 <- Heatmap(as.matrix(detection_matrix),
 # Draw the heatmap
 draw(p2,
      annotation_legend_side = "right",
-     padding = unit(c(1, 2, 2, 2), "cm"))
+     padding = unit(c(2, 2, 2, 2), "cm"))
 
 # Add main title
 grid.text("Detection Patterns: Group-Specific Proteins",
           y = unit(1, "npc") - unit(1, "cm"),
           gp = gpar(fontsize = 20))
-
-cat("Heatmap created with dep-specific proteins (top) separated from non-dep-specific proteins (bottom)\n")
 
 cat("\n=== HEATMAP VISUALIZATION COMPLETE ===\n")
